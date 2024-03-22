@@ -1,0 +1,16 @@
+[package]
+name = "ql-raster"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+base64 = "0.22.0"
+bitflags = "2.5.0"
+num_enum = "0.7.2"
+snmp = { version = "0.2.2", optional = true }
+
+[features]
+default = ["net"]
+net = ["dep:snmp"]
