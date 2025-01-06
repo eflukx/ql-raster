@@ -1,6 +1,6 @@
 use crate::{prelude::*, PTouchError};
 use std::{
-    net::{IpAddr, SocketAddr, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs},
     time::Duration,
 };
 
@@ -27,7 +27,6 @@ mod snmp_oid {
 
 pub struct PTouchPrinter<D> {
     pub interface: D,
-    pub ip_addr: Option<IpAddr>,
     send_buffer: Option<Vec<u8>>, // Probably use a type (of PTouchPrinter) to diff between buffered and direct io
 }
 
@@ -60,7 +59,7 @@ impl PTouchPrinter<PTouchTcpInterface> {
     fn get_snmp(&self, oid: &[u32]) -> Result<Vec<u8>> {
         use snmp::{SyncSession, Value};
 
-        if let Some(ip_addr) = self.ip_addr {
+        if let Some(ip_addr) = self.interface.ip_addr {
             let addr = SocketAddr::new(ip_addr, 161);
             let timeout = Duration::from_millis(500);
             let mut snmp_session = SyncSession::new(addr, b"public", Some(timeout), 0)?;
@@ -76,24 +75,20 @@ impl PTouchPrinter<PTouchTcpInterface> {
 }
 
 pub fn from_addr<A: ToSocketAddrs>(addr: A) -> Result<PTouchPrinter<PTouchTcpInterface>> {
-    let ip_addr = addr
-        .to_socket_addrs()
-        .ok()
-        .and_then(|mut e| e.next())
-        .map(|sa| sa.ip());
-
     Ok(PTouchPrinter {
-        ip_addr,
         interface: PTouchTcpInterface::new(addr, Some(DEFAULT_TIMEOUT))?,
-        // send_buffer: Some(Vec::with_capacity(2048)), // buffered IO
-        send_buffer: None, // unbuffered, immediate IO
+
+        // // buffered IO
+        // send_buffer: Some(Vec::with_capacity(2048)),
+        // unbuffered, immediate IO
+        send_buffer: None,
     })
 }
 
 impl<D: PTouchInterface> PTouchPrinter<D> {
-    // pub fn get_status(&mut self) -> Result<Status> {
-    //     Ok(Status)
-    // }
+        // pub fn get_status(&mut self) -> Result<Status> {
+        //     Ok(Status)
+        // }
 
     // Todo: send `Command` type
     pub fn write(&mut self, data: impl AsRef<[u8]>) -> Result<()> {

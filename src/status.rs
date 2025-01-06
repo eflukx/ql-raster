@@ -1,8 +1,18 @@
 use std::fmt::Debug;
 
-use crate::{PTouchError, Result};
+use crate::{prelude::PTouchTcpInterface, printer::PTouchPrinter, PTouchError, Result};
 use bitflags::bitflags;
-use num_enum::{FromPrimitive, IntoPrimitive, TryFromPrimitive};
+use num_enum::{FromPrimitive, IntoPrimitive};
+
+pub trait GetStatus {
+    fn get_status(&mut self) -> Result<Status>;
+}
+
+impl GetStatus for PTouchPrinter<PTouchTcpInterface> {
+    fn get_status(&mut self) -> Result<Status> {
+        self.get_snmp_status()
+    }
+}
 
 /// Device status message
 #[derive(Clone, PartialEq, Debug)]

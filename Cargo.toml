@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 base64 = "0.22.0"
 bitflags = "2.5.0"
+image = { version = "0.25.5", default-features = false, features = ["png"] }
 num_enum = "0.7.2"
 snmp = { version = "0.2.2", optional = true }
 

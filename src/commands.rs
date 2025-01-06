@@ -20,11 +20,11 @@ pub trait Commands {
     /// Read a status response with the provided timeout
     // fn read_status(&mut self) -> Result<Status>;
 
-    /// Switch mode, required for raster printing
-    fn switch_mode(&mut self, mode: Mode) -> Result<()>;
-
     /// Set status notify (printer automatically sends status on change)
     // fn set_status_notify(&mut self, enabled: bool) -> Result<()>;
+
+    /// Switch mode, required for raster printing
+    fn switch_mode(&mut self, mode: Mode) -> Result<()>;
 
     /// Set print information
     fn set_print_info(&mut self, info: &PrintInfo) -> Result<()>;
@@ -71,19 +71,6 @@ impl<I: PTouchInterface> Commands for PTouchPrinter<I> {
     fn init(&mut self) -> Result<()> {
         self.write([0x1b, 0x40])
     }
-
-    // fn read_status(&mut self) -> Result<Status> {
-    //     let response = self.send_raw_with_response([0x1b, 0x69, 0x53])?;
-
-    //     println!("RESPONSE: {response:?}");
-
-    //     // let status = Status::from(status_raw);
-    //     // debug!("Status: {:?}", status);
-    //     // trace!("Raw status: {:?}", &status_raw);
-    //     // Ok(status)
-
-    //     Status::try_from(response.as_slice())
-    // }
 
     fn switch_mode(&mut self, mode: Mode) -> Result<()> {
         self.write([0x1b, 0x69, 0x61, mode as u8])
@@ -164,10 +151,8 @@ impl<I: PTouchInterface> Commands for PTouchPrinter<I> {
 
     // We assume an uncomressed line!
     fn transfer_raster_line(&mut self, data: &[u8]) -> Result<()> {
-
         let mut buff = Vec::with_capacity(data.len() + 3);
         buff.push(0x67); // Transfer raster data command
-
 
         // alternative 'engine' (used by handheld labelers)
         // buff.push((data.len() & 0xFF) as u8);
@@ -179,7 +164,7 @@ impl<I: PTouchInterface> Commands for PTouchPrinter<I> {
         buff.extend_from_slice(data);
 
         // trace!("Raster transfer: {:02x?}", &buff[..3 + data.len()]);
-        println!("Raster transfer: {:02x?}", &buff);
+        // println!("Raster transfer: {:02x?}", &buff);
 
         self.write(buff.as_slice())
     }

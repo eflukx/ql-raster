@@ -1,15 +1,19 @@
 use std::io;
 
+pub mod commands;
 pub mod interface;
 pub mod printer;
-pub mod commands;
 pub mod status;
+pub mod raster;
 
 pub mod prelude {
     pub use super::interface::{PTouchInterface, PTouchTcpInterface};
-    pub use super::printer;
-    pub use super::status::Status;
+    pub use super::printer::{self, PTouchPrinter};
+
+    pub use super::commands::{Commands, PrintInfo, VariousMode};
+    pub use super::status::{GetStatus, Status};
     pub use super::Result;
+    pub use super::raster::RasterBuffer;
 }
 
 pub type Result<T> = std::result::Result<T, PTouchError>;
