@@ -6,13 +6,13 @@ use crate::{prelude::*, printer::PTouchPrinter, status::MediaKind};
 /// This provides low-level access to the device (if desired)
 pub trait Commands {
     /// Null command
-    fn null(&mut self) -> Result<()>;
+    fn null(&mut self) -> PTResult<()>;
 
     /// Init command, sets up the device for printing
-    fn init(&mut self) -> Result<()>;
+    fn init(&mut self) -> PTResult<()>;
 
     /// Invalidate command, resets the device
-    fn invalidate(&mut self) -> Result<()>;
+    fn invalidate(&mut self) -> PTResult<()>;
 
     /// Issue a status request
     // fn status_req(&mut self) -> Result<()>;
@@ -24,55 +24,55 @@ pub trait Commands {
     // fn set_status_notify(&mut self, enabled: bool) -> Result<()>;
 
     /// Switch mode, required for raster printing
-    fn switch_mode(&mut self, mode: Mode) -> Result<()>;
+    fn switch_mode(&mut self, mode: Mode) -> PTResult<()>;
 
     /// Set print information
-    fn set_print_info(&mut self, info: &PrintInfo) -> Result<()>;
+    fn set_print_info(&mut self, info: &PrintInfo) -> PTResult<()>;
 
     /// Set various mode flags
-    fn set_various_mode(&mut self, mode: VariousMode) -> Result<()>;
+    fn set_various_mode(&mut self, mode: VariousMode) -> PTResult<()>;
 
     /// Set advanced mode flags
-    fn set_advanced_mode(&mut self, mode: AdvancedMode) -> Result<()>;
+    fn set_advanced_mode(&mut self, mode: AdvancedMode) -> PTResult<()>;
 
     /// Set pre/post print margin
-    fn set_margin(&mut self, dots: u16) -> Result<()>;
+    fn set_margin(&mut self, dots: u16) -> PTResult<()>;
 
     /// Set print page number
-    fn set_page_no(&mut self, no: u8) -> Result<()>;
+    fn set_page_no(&mut self, no: u8) -> PTResult<()>;
 
     /// Set compression mode (None or Tiff).
     /// Note TIFF mode is currently... broken
-    fn set_compression_mode(&mut self, mode: CompressionMode) -> Result<()>;
+    fn set_compression_mode(&mut self, mode: CompressionMode) -> PTResult<()>;
 
     /// Transfer raster data
-    fn transfer_raster_line(&mut self, data: &[u8]) -> Result<()>;
+    fn transfer_raster_line(&mut self, data: &[u8]) -> PTResult<()>;
 
     /// Send a zero raster line
-    fn raster_zero(&mut self) -> Result<()>;
+    fn raster_zero(&mut self) -> PTResult<()>;
 
     /// Start a print
-    fn print(&mut self) -> Result<()>;
+    fn print(&mut self) -> PTResult<()>;
 
     /// Start a print and feed
-    fn print_and_feed(&mut self) -> Result<()>;
+    fn print_and_feed(&mut self) -> PTResult<()>;
 }
 
 /// Low-level command API implementation
 impl<I: PTouchInterface> Commands for PTouchPrinter<I> {
-    fn null(&mut self) -> Result<()> {
+    fn null(&mut self) -> PTResult<()> {
         self.write([0x00])
     }
 
-    fn invalidate(&mut self) -> Result<()> {
+    fn invalidate(&mut self) -> PTResult<()> {
         self.write([0u8; 400])
     }
 
-    fn init(&mut self) -> Result<()> {
+    fn init(&mut self) -> PTResult<()> {
         self.write([0x1b, 0x40])
     }
 
-    fn switch_mode(&mut self, mode: Mode) -> Result<()> {
+    fn switch_mode(&mut self, mode: Mode) -> PTResult<()> {
         self.write([0x1b, 0x69, 0x61, mode as u8])
     }
 
@@ -85,7 +85,7 @@ impl<I: PTouchInterface> Commands for PTouchPrinter<I> {
     //     self.write(&[0x1b, 0x69, 0x21, en])
     // }
 
-    fn set_print_info(&mut self, info: &PrintInfo) -> Result<()> {
+    fn set_print_info(&mut self, info: &PrintInfo) -> PTResult<()> {
         let mut buff = [0u8; 13];
 
         // debug!("Set print info: {:?}", info);
@@ -120,37 +120,37 @@ impl<I: PTouchInterface> Commands for PTouchPrinter<I> {
         self.write(&buff)
     }
 
-    fn set_various_mode(&mut self, mode: VariousMode) -> Result<()> {
+    fn set_various_mode(&mut self, mode: VariousMode) -> PTResult<()> {
         // debug!("Set various mode: {:?}", mode);
 
         self.write([0x1b, 0x69, 0x4d, mode.bits()])
     }
 
-    fn set_advanced_mode(&mut self, mode: AdvancedMode) -> Result<()> {
+    fn set_advanced_mode(&mut self, mode: AdvancedMode) -> PTResult<()> {
         // debug!("Set advanced mode: {:?}", mode);
 
         self.write([0x1b, 0x69, 0x4b, mode.bits()])
     }
 
-    fn set_margin(&mut self, dots: u16) -> Result<()> {
+    fn set_margin(&mut self, dots: u16) -> PTResult<()> {
         // debug!("Set margin: {:?}", dots);
 
         self.write([0x1b, 0x69, 0x64, dots as u8, (dots >> 8) as u8])
     }
 
-    fn set_page_no(&mut self, no: u8) -> Result<()> {
+    fn set_page_no(&mut self, no: u8) -> PTResult<()> {
         // debug!("Set page no: {:?}", no);
         self.write([0x1b, 0x69, 0x41, no])
     }
 
-    fn set_compression_mode(&mut self, mode: CompressionMode) -> Result<()> {
+    fn set_compression_mode(&mut self, mode: CompressionMode) -> PTResult<()> {
         // debug!("Set compression mode: {:?}", mode);
 
         self.write([0x4D, mode as u8])
     }
 
     // We assume an uncomressed line!
-    fn transfer_raster_line(&mut self, data: &[u8]) -> Result<()> {
+    fn transfer_raster_line(&mut self, data: &[u8]) -> PTResult<()> {
         let mut buff = Vec::with_capacity(data.len() + 3);
         buff.push(0x67); // Transfer raster data command
 
@@ -169,18 +169,18 @@ impl<I: PTouchInterface> Commands for PTouchPrinter<I> {
         self.write(buff.as_slice())
     }
 
-    fn raster_zero(&mut self) -> Result<()> {
+    fn raster_zero(&mut self) -> PTResult<()> {
         // debug!("Raster zero line");
 
         self.write([0x5a])
     }
 
-    fn print(&mut self) -> Result<()> {
+    fn print(&mut self) -> PTResult<()> {
         // debug!("Print command");
         self.write([0x0c])
     }
 
-    fn print_and_feed(&mut self) -> Result<()> {
+    fn print_and_feed(&mut self) -> PTResult<()> {
         // debug!("Print feed command");
         self.write([0x1a])
     }

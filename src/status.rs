@@ -1,15 +1,15 @@
 use std::fmt::Debug;
 
-use crate::{prelude::PTouchTcpInterface, printer::PTouchPrinter, PTouchError, Result};
+use crate::{prelude::PTouchTcpInterface, printer::PTouchPrinter, PTouchError, PTResult};
 use bitflags::bitflags;
 use num_enum::{FromPrimitive, IntoPrimitive};
 
 pub trait GetStatus {
-    fn get_status(&mut self) -> Result<Status>;
+    fn get_status(&mut self) -> PTResult<Status>;
 }
 
 impl GetStatus for PTouchPrinter<PTouchTcpInterface> {
-    fn get_status(&mut self) -> Result<Status> {
+    fn get_status(&mut self) -> PTResult<Status> {
         self.get_snmp_status()
     }
 }
@@ -32,7 +32,7 @@ pub struct Status {
 impl TryFrom<&[u8]> for Status {
     type Error = PTouchError;
 
-    fn try_from(value: &[u8]) -> Result<Self> {
+    fn try_from(value: &[u8]) -> PTResult<Self> {
         let ary: [u8; 32] = value
             .try_into()
             .map_err(|_| PTouchError::InvalidStatusPayload)?;
