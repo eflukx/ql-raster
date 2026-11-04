@@ -2,6 +2,7 @@ use std::{error::Error, fmt::Display, io};
 
 pub mod commands;
 pub mod interface;
+pub mod media;
 pub mod printer;
 pub mod raster;
 pub mod status;
@@ -11,6 +12,7 @@ pub mod prelude {
     pub use super::printer::{self, PTouchPrinter};
 
     pub use super::commands::{Commands, PrintInfo, VariousMode};
+    pub use super::media::{Media, MediaShape};
     pub use super::raster::RasterBuffer;
     pub use super::status::{GetStatus, Status};
     pub use super::PTResult;
