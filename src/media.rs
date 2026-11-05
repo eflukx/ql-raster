@@ -36,7 +36,8 @@ pub const HEAD_PINS: u16 = 720;
 /// Feed (margin) for continuous tape: the minimum, 3 mm (2.3.3).
 pub const CONTINUOUS_FEED_DOTS: u16 = 35;
 
-/// Shortest continuous label: 12.7 mm (2.3.4).
+/// Shortest continuous label: 12.7 mm (2.3.4), the feed at both ends included (P-touch prints
+/// a 14.6 mm label of 102 raster lines plus 2 × 35 dots feed).
 pub const CONTINUOUS_MIN_LENGTH_DOTS: u32 = 150;
 
 /// Longest continuous label: 1 m (2.3.4).
@@ -176,8 +177,8 @@ impl fmt::Display for MediaError {
             ),
             Self::LengthOutOfRange { length } => write!(
                 f,
-                "label is {length} dots long; continuous tape takes \
-                 {CONTINUOUS_MIN_LENGTH_DOTS} to {CONTINUOUS_MAX_LENGTH_DOTS}"
+                "label is {length} dots long, plus 2 × {CONTINUOUS_FEED_DOTS} feed; continuous \
+                 tape takes {CONTINUOUS_MIN_LENGTH_DOTS} to {CONTINUOUS_MAX_LENGTH_DOTS} with the feed"
             ),
         }
     }
@@ -281,7 +282,8 @@ impl Media {
         }
 
         if self.is_continuous() {
-            if !(CONTINUOUS_MIN_LENGTH_DOTS..=CONTINUOUS_MAX_LENGTH_DOTS).contains(&length) {
+            let printed = length + 2 * u32::from(CONTINUOUS_FEED_DOTS);
+            if !(CONTINUOUS_MIN_LENGTH_DOTS..=CONTINUOUS_MAX_LENGTH_DOTS).contains(&printed) {
                 return Err(MediaError::LengthOutOfRange { length });
             }
         } else if length != u32::from(self.print_length_dots) {
@@ -376,8 +378,10 @@ mod tests {
             tape.check_size(697, 248),
             Err(MediaError::TooWide { .. })
         ));
+        // 80 raster lines and 2 × 35 feed: exactly the 150-dot minimum.
+        assert!(tape.check_size(696, 80).is_ok());
         assert!(matches!(
-            tape.check_size(696, 100),
+            tape.check_size(696, 79),
             Err(MediaError::LengthOutOfRange { .. })
         ));
 
