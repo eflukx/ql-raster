@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::{prelude::PTouchTcpInterface, printer::PTouchPrinter, PTouchError, PTResult};
+use crate::{prelude::PTouchTcpInterface, printer::PTouchPrinter, PTResult, PTouchError};
 use bitflags::bitflags;
 use num_enum::{FromPrimitive, IntoPrimitive};
 

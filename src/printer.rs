@@ -10,13 +10,13 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_millis(1500);
 #[allow(dead_code)]
 // #[rustfmt::skip]
 mod snmp_oid {
-    pub const STATUS: &[u32] =  &[1, 3, 6, 1, 4, 1, 2435, 3, 3, 9, 1, 6, 1, 0];
-    pub const NAME: &[u32] =    &[1, 3, 6, 1, 2, 1, 1, 6, 0];
-    pub const MODEL: &[u32] =   &[1, 3, 6, 1, 2, 1, 25, 3, 2, 1, 3, 1];
-    pub const SERIAL: &[u32] =  &[1, 3, 6, 1, 2, 1, 43, 5, 1, 1, 17];
+    pub const STATUS: &[u32] = &[1, 3, 6, 1, 4, 1, 2435, 3, 3, 9, 1, 6, 1, 0];
+    pub const NAME: &[u32] = &[1, 3, 6, 1, 2, 1, 1, 5, 0];
+    pub const MODEL: &[u32] = &[1, 3, 6, 1, 2, 1, 25, 3, 2, 1, 3, 1];
+    pub const SERIAL: &[u32] = &[1, 3, 6, 1, 2, 1, 43, 5, 1, 1, 17];
     pub const IP_ADDR: &[u32] = &[1, 3, 6, 1, 4, 1, 1240, 2, 3, 4, 5, 2, 3, 0];
-    pub const SUBNET: &[u32] =  &[1, 3, 6, 1, 4, 1, 1240, 2, 3, 4, 5, 2, 4, 0];
-    pub const MAC: &[u32] =     &[1, 3, 6, 1, 4, 1, 1240, 2, 3, 4, 5, 2, 12, 0];
+    pub const SUBNET: &[u32] = &[1, 3, 6, 1, 4, 1, 1240, 2, 3, 4, 5, 2, 4, 0];
+    pub const MAC: &[u32] = &[1, 3, 6, 1, 4, 1, 1240, 2, 3, 4, 5, 2, 12, 0];
 }
 
 // pub enum EngineHandHeld {} // 128px wide @ 180dpi (18mm)
