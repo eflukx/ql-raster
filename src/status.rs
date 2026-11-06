@@ -91,6 +91,15 @@ impl Model {
         }
     }
 
+    /// Does the printer take TIFF (PackBits) compressed raster lines: the QL-710W, 720NW,
+    /// 810W and 820NWB do; the QL-800 and QL-600 don't (their references).
+    pub fn support_compression(&self) -> bool {
+        matches!(
+            self,
+            Self::QL710W | Self::QL720NW | Self::QL810W | Self::QL820NWB
+        )
+    }
+
     /// Does the printer support double vertical resolution (i.e. half speed)
     pub fn support_double_dpi(&self) -> bool {
         match self {
