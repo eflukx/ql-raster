@@ -43,6 +43,30 @@ pub const CONTINUOUS_MIN_LENGTH_DOTS: u32 = 150;
 /// Longest continuous label: 1 m (2.3.4).
 pub const CONTINUOUS_MAX_LENGTH_DOTS: u32 = 11811;
 
+/// Dots along the tape. The 300-dpi QL printers also print 600 dpi along the tape (the
+/// expanded mode's [`crate::commands::AdvancedMode::HIGH_RES`], on models with
+/// [`crate::status::Model::support_double_dpi`]): twice the raster lines, the head's 300 dpi
+/// across, the feed margin still in 300-dpi dots.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Resolution {
+    /// 300 × 300 dpi.
+    #[default]
+    Normal,
+    /// 300 dpi across, 600 dpi along the tape: sharper, slower.
+    High,
+}
+
+impl Resolution {
+    /// Raster lines per 300-dpi dot along the tape.
+    #[must_use]
+    pub fn lines_per_dot(self) -> u32 {
+        match self {
+            Self::Normal => 1,
+            Self::High => 2,
+        }
+    }
+}
+
 /// The form of a medium.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MediaShape {
@@ -272,6 +296,17 @@ impl Media {
         (x < self.print_pins).then(|| self.left_pins + x)
     }
 
+    /// Checks a label of `width` dots × `lines` raster lines at `resolution` against this
+    /// medium: in high resolution two lines make one 300-dpi dot along the tape.
+    pub fn check_raster(
+        &self,
+        width: u32,
+        lines: u32,
+        resolution: Resolution,
+    ) -> Result<(), MediaError> {
+        self.check_size(width, lines.div_ceil(resolution.lines_per_dot()))
+    }
+
     /// Checks a label of `width` × `length` dots against this medium.
     pub fn check_size(&self, width: u32, length: u32) -> Result<(), MediaError> {
         if width > u32::from(self.print_pins) {
@@ -322,6 +357,21 @@ impl fmt::Display for Media {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn high_resolution_takes_twice_the_lines() {
+        let die_cut = Media::by_id("62x100").expect("known");
+        let lines = u32::from(die_cut.print_length_dots);
+        assert!(die_cut
+            .check_raster(696, 2 * lines, Resolution::High)
+            .is_ok());
+        assert!(die_cut.check_raster(696, lines, Resolution::High).is_err());
+        assert!(die_cut.check_raster(696, lines, Resolution::Normal).is_ok());
+        // 150 lines are 75 dots: under the shortest continuous label.
+        let tape = Media::by_id("62").expect("known");
+        assert!(tape.check_raster(696, 150, Resolution::High).is_err());
+        assert!(tape.check_raster(696, 160, Resolution::High).is_ok());
+    }
 
     #[test]
     fn every_medium_spans_the_head() {
