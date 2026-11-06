@@ -138,6 +138,9 @@ impl<I: PTouchInterface> Commands for PTouchPrinter<I> {
         self.write(buff.as_slice())
     }
 
+    /// Zero raster graphics (5Ah): valid only in TIFF compression mode (Raster Command
+    /// Reference, QL-710W). Without compression send a `g` line of zeros: over USB the printer
+    /// stops at a 5Ah.
     fn raster_zero(&mut self) -> PTResult<()> {
         // debug!("Raster zero line");
 

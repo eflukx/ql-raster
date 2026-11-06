@@ -6,6 +6,8 @@ pub mod media;
 pub mod printer;
 pub mod raster;
 pub mod status;
+#[cfg(windows)]
+pub mod usb;
 
 pub mod prelude {
     pub use super::interface::{PTouchInterface, PTouchTcpInterface};
