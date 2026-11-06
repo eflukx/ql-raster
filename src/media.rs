@@ -340,6 +340,8 @@ impl Media {
             length: Some(self.length_mm),
             raster_no,
             recover: true,
+            quality: false,
+            later_page: false,
         }
     }
 }
@@ -357,6 +359,20 @@ impl fmt::Display for Media {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn print_info_bytes() {
+        let info = PrintInfo {
+            quality: true,
+            later_page: true,
+            ..Media::by_id("62x100").expect("known").print_info(1100)
+        };
+        let bytes = info.to_bytes();
+        assert_eq!(&bytes[..7], &[0x1b, 0x69, 0x7a, 0xce, 0x0b, 62, 100]);
+        assert_eq!(&bytes[7..], &[0x4c, 0x04, 0, 0, 1, 0]);
+        let tape = Media::by_id("62").expect("known").print_info(10).to_bytes();
+        assert_eq!(&tape[3..7], &[0x8e, 0x0a, 62, 0]);
+    }
 
     #[test]
     fn high_resolution_takes_twice_the_lines() {

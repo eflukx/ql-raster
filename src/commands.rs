@@ -86,38 +86,7 @@ impl<I: PTouchInterface> Commands for PTouchPrinter<I> {
     // }
 
     fn set_print_info(&mut self, info: &PrintInfo) -> PTResult<()> {
-        let mut buff = [0u8; 13];
-
-        // debug!("Set print info: {:?}", info);
-
-        // Command header
-        buff[0] = 0x1b;
-        buff[1] = 0x69;
-        buff[2] = 0x7a;
-
-        if let Some(i) = &info.kind {
-            buff[3] |= 0x02;
-            buff[4] = u8::from(*i)
-        }
-
-        if let Some(w) = &info.width {
-            buff[3] |= 0x04;
-            buff[5] = *w;
-        }
-
-        if let Some(l) = &info.length {
-            buff[3] |= 0x08;
-            buff[6] = *l;
-        }
-
-        let raster_bytes = info.raster_no.to_le_bytes();
-        buff[7..11].copy_from_slice(&raster_bytes);
-
-        if info.recover {
-            buff[3] |= 0x80;
-        }
-
-        self.write(&buff)
+        self.write(info.to_bytes())
     }
 
     fn set_various_mode(&mut self, mode: VariousMode) -> PTResult<()> {
@@ -232,6 +201,47 @@ pub struct PrintInfo {
     pub raster_no: u32,
     /// Enable print recovery
     pub recover: bool,
+    /// Priority to print quality over speed (n1 bit 0x40; QL-710W/720NW, 800 series; not
+    /// with two-colour printing)
+    pub quality: bool,
+    /// A later page of a multi-page job (n9 = 1); the first page has 0
+    pub later_page: bool,
+}
+
+impl PrintInfo {
+    /// The command: `ESC i z n1 … n10`.
+    #[must_use]
+    pub fn to_bytes(&self) -> [u8; 13] {
+        let mut buff = [0u8; 13];
+        buff[..3].copy_from_slice(&[0x1b, 0x69, 0x7a]);
+
+        if let Some(kind) = self.kind {
+            buff[3] |= 0x02;
+            // The status reports 4Ah / 4Bh; this command takes 0Ah / 0Bh.
+            buff[4] = match kind {
+                MediaKind::ContinuousLengthTape => 0x0a,
+                MediaKind::DieCutLabels => 0x0b,
+                other => u8::from(other),
+            };
+        }
+        if let Some(width) = self.width {
+            buff[3] |= 0x04;
+            buff[5] = width;
+        }
+        if let Some(length) = self.length {
+            buff[3] |= 0x08;
+            buff[6] = length;
+        }
+        buff[7..11].copy_from_slice(&self.raster_no.to_le_bytes());
+        if self.quality {
+            buff[3] |= 0x40;
+        }
+        if self.recover {
+            buff[3] |= 0x80;
+        }
+        buff[11] = u8::from(self.later_page);
+        buff
+    }
 }
 
 impl Default for PrintInfo {
@@ -242,6 +252,8 @@ impl Default for PrintInfo {
             length: Some(0),
             raster_no: 0,
             recover: true,
+            quality: false,
+            later_page: false,
         }
     }
 }
