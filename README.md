@@ -17,18 +17,20 @@ reference.
 | `job` | The command stream of a job: pages, cutting (each, at the end, off), high resolution, compression. |
 | `status` | The 32-byte status block: model, errors, loaded media. |
 | `net` | Jobs over TCP 9100; status, model, name and serial over SNMP; searching the network for printers. Feature `net` (default). |
+| `Printer` | A printer by its address, network or USB alike: status, send a job, abort. |
 | `usb` | The same on USB, addressed as `usb:<serial>`. Windows, through its own "USB Printing Support" driver: no Brother driver, no Zadig. |
 
 ## Example
 
 ```rust
 use ql_raster::label::{Length, Run, TextLabel};
-use ql_raster::{job, net, raster};
+use ql_raster::{Printer, job, raster};
 
-let status = net::query_status("192.168.1.57")?;
+let printer = Printer::new("192.168.1.57"); // or "usb:000H6Z560817"
+let status = printer.status()?;
 let media = status.loaded_media().ok_or("no known tape loaded")?;
 let bitmap = TextLabel::new("Hello\n*label*").render(u32::from(media.print_pins), Length::Free, Run::AlongTape);
-net::send_job("192.168.1.57", &job::job_bytes(&raster::raster_lines(&bitmap, media)?, media))?;
+printer.send_job(&job::job_bytes(&raster::raster_lines(&bitmap, media)?, media))?;
 ```
 
 `cargo run --example print_text -- <printer> "first line" "second line"` prints on whatever tape

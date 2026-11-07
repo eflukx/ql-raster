@@ -11,6 +11,7 @@
 //! - [`net`]: sending a job over TCP 9100; status, model, name and serial over SNMP; searching
 //!   the network for printers.
 //! - [`usb`]: the same on USB, addressed as `usb:<serial>`.
+//! - [`Printer`]: a printer by its address, network or USB alike: status, send a job, abort.
 //!
 //! Checked against Brother's "Raster Command Reference" for these models (in `doc/`).
 
@@ -20,11 +21,13 @@ pub mod label;
 pub mod media;
 #[cfg(feature = "net")]
 pub mod net;
+pub mod printer;
 pub mod raster;
 pub mod status;
 pub mod usb;
 
 pub use media::{Media, MediaShape};
+pub use printer::Printer;
 pub use status::{MediaKind, Model, Status};
 
 /// Errors talking to a printer.

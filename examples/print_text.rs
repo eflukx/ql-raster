@@ -4,19 +4,15 @@
 //! printer as a host name or IP address (network) or `usb:<serial>` (USB, Windows).
 
 use ql_raster::label::{Length, Run, TextLabel};
-use ql_raster::{job, net, raster, usb};
+use ql_raster::{Printer, job, raster};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
-    let printer = args.next().ok_or("usage: print_text <printer> <line>…")?;
+    let printer = Printer::new(args.next().ok_or("usage: print_text <printer> <line>…")?);
     let text = args.collect::<Vec<_>>().join("\n");
 
     // The status says which tape is loaded; the label is drawn for it.
-    let status = if usb::is_usb(&printer) {
-        usb::query_status(&printer)?
-    } else {
-        net::query_status(&printer)?
-    };
+    let status = printer.status()?;
     let media = status.loaded_media().ok_or("no known tape loaded")?;
     println!("{} with {media}", status.model);
 
@@ -27,10 +23,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bitmap = TextLabel::new(&text).render(u32::from(media.print_pins), length, Run::AlongTape);
     let job = job::job_bytes(&raster::raster_lines(&bitmap, media)?, media);
 
-    if usb::is_usb(&printer) {
-        usb::send_job(&printer, &job)?;
-    } else {
-        net::send_job(&printer, &job)?;
-    }
+    printer.send_job(&job)?;
     Ok(())
 }
