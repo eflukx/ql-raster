@@ -1,15 +1,19 @@
 [package]
 name = "ql-raster"
-version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "Brother QL label printers: labels as bitmaps, raster jobs, printing over TCP 9100 and USB, status."
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.85"
+repository = "https://github.com/eflukx/ql-raster"
+keywords = ["brother", "label", "printer", "ql-710w", "raster"]
+categories = ["hardware-support"]
+license = "MIT OR Apache-2.0"
+authors = ["Rogier Lodewijks <rogier@lodewijks.org>"]
 
 [dependencies]
-base64 = "0.22.0"
-bitflags = "2.5.0"
-image = { version = "0.25.5", default-features = false, features = ["png"] }
-num_enum = "0.7.2"
+ab_glyph = "0.2"
+bitflags = "2.5"
+image = { version = "0.25", default-features = false, features = ["png"] }
 snmp = { version = "0.2.2", optional = true }
 
 [target.'cfg(windows)'.dependencies]
@@ -23,4 +27,12 @@ windows-sys = { version = "0.61", features = [
 
 [features]
 default = ["net"]
+# Network printing: TCP 9100, SNMP status, searching the network.
 net = ["dep:snmp"]
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+unwrap_used = "warn"
+must_use_candidate = "warn"

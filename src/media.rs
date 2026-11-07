@@ -28,7 +28,7 @@
 use std::fmt;
 
 use crate::commands::PrintInfo;
-use crate::status::{MediaKind, Status};
+use crate::status::MediaKind;
 
 /// Pins on the print head of these printers.
 pub const HEAD_PINS: u16 = 720;
@@ -45,7 +45,7 @@ pub const CONTINUOUS_MAX_LENGTH_DOTS: u32 = 11811;
 
 /// Dots along the tape. The 300-dpi QL printers also print 600 dpi along the tape (the
 /// expanded mode's [`crate::commands::AdvancedMode::HIGH_RES`], on models with
-/// [`crate::status::Model::support_double_dpi`]): twice the raster lines, the head's 300 dpi
+/// [`crate::status::Model::high_resolution`]): twice the raster lines, the head's 300 dpi
 /// across, the feed margin still in 300-dpi dots.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Resolution {
@@ -234,23 +234,6 @@ impl Media {
         })
     }
 
-    /// The medium loaded according to a status; `None` without media or for unknown media.
-    #[must_use]
-    pub fn from_status(status: &Status) -> Option<&'static Media> {
-        let continuous = match status.media_kind {
-            MediaKind::ContinuousLengthTape => true,
-            MediaKind::DieCutLabels => false,
-            _ => return None,
-        };
-        Self::reported(continuous, status.media_width, status.media_length)
-    }
-
-    /// Whether this medium is what a status reports as loaded.
-    #[must_use]
-    pub fn is_loaded(&self, status: &Status) -> bool {
-        Self::from_status(status) == Some(self)
-    }
-
     /// Whether this is continuous tape.
     #[must_use]
     pub fn is_continuous(&self) -> bool {
@@ -261,9 +244,9 @@ impl Media {
     #[must_use]
     pub fn kind(&self) -> MediaKind {
         if self.is_continuous() {
-            MediaKind::ContinuousLengthTape
+            MediaKind::Continuous
         } else {
-            MediaKind::DieCutLabels
+            MediaKind::DieCut
         }
     }
 
@@ -271,11 +254,7 @@ impl Media {
     /// 0Bh die-cut. (The status reports 4Ah and 4Bh for the same media.)
     #[must_use]
     pub fn print_info_type(&self) -> u8 {
-        if self.is_continuous() {
-            0x0a
-        } else {
-            0x0b
-        }
+        if self.is_continuous() { 0x0a } else { 0x0b }
     }
 
     /// The feed to set with `ESC i d`: 35 dots on continuous tape, 0 on die-cut labels (their
@@ -378,9 +357,11 @@ mod tests {
     fn high_resolution_takes_twice_the_lines() {
         let die_cut = Media::by_id("62x100").expect("known");
         let lines = u32::from(die_cut.print_length_dots);
-        assert!(die_cut
-            .check_raster(696, 2 * lines, Resolution::High)
-            .is_ok());
+        assert!(
+            die_cut
+                .check_raster(696, 2 * lines, Resolution::High)
+                .is_ok()
+        );
         assert!(die_cut.check_raster(696, lines, Resolution::High).is_err());
         assert!(die_cut.check_raster(696, lines, Resolution::Normal).is_ok());
         // 150 lines are 75 dots: under the shortest continuous label.
@@ -463,7 +444,7 @@ mod tests {
     fn print_information_follows_the_medium() {
         let labels = Media::by_id("62x100").unwrap();
         let info = labels.print_info(1109);
-        assert_eq!(info.kind, Some(MediaKind::DieCutLabels));
+        assert_eq!(info.kind, Some(MediaKind::DieCut));
         assert_eq!((info.width, info.length), (Some(62), Some(100)));
         assert_eq!((labels.print_info_type(), labels.feed_dots()), (0x0b, 0));
 

@@ -1,244 +1,268 @@
-use std::fmt::Debug;
+//! The 32-byte status block (Raster Command Reference, "Status information").
 
-use crate::{prelude::PTouchTcpInterface, printer::PTouchPrinter, PTResult, PTouchError};
-use bitflags::bitflags;
-use num_enum::{FromPrimitive, IntoPrimitive};
+use std::fmt;
 
-pub trait GetStatus {
-    fn get_status(&mut self) -> PTResult<Status>;
-}
+use crate::PrinterError;
+use crate::media::Media;
 
-impl GetStatus for PTouchPrinter<PTouchTcpInterface> {
-    fn get_status(&mut self) -> PTResult<Status> {
-        self.get_snmp_status()
-    }
-}
-
-/// Device status message
-#[derive(Clone, PartialEq, Debug)]
-pub struct Status {
-    pub model: Model,
-    pub error_status: ErrorStatus,
-    pub status_type: DeviceStatus,
-
-    pub media_width: u8,
-    pub media_length: u8,
-    pub media_kind: MediaKind,
-    // pub phase: Phase,
-    pub tape_colour: TapeColour,
-    pub text_colour: TextColour,
-}
-
-impl TryFrom<&[u8]> for Status {
-    type Error = PTouchError;
-
-    fn try_from(value: &[u8]) -> PTResult<Self> {
-        let ary: [u8; 32] = value
-            .try_into()
-            .map_err(|_| PTouchError::InvalidStatusPayload)?;
-        Ok(ary.into())
-    }
-}
-
-impl From<[u8; 32]> for Status {
-    fn from(r: [u8; 32]) -> Self {
-        Self {
-            model: Model::from(r[4]),
-            error_status: ErrorStatus::from_bits_truncate(u16::from_le_bytes([r[8], r[9]])),
-
-            media_width: r[10],
-            media_length: r[17],
-            media_kind: MediaKind::from(r[11]),
-            status_type: DeviceStatus::from(r[18]),
-            // phase: Phase::from(r[20]),
-            tape_colour: TapeColour::from(r[24]),
-            text_colour: TextColour::from(r[25]),
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Debug, FromPrimitive)]
-#[repr(u8)]
+/// Printer model (status byte 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Model {
-    // Standard 300(600)DPI desk printers
-    QL710W = 0x36,
-    QL720NW = 0x37,
-    QL800 = 0x38,
-    QL810W = 0x39,
-    QL820NWB = 0x41,
-    QL600 = 0x47,
-
-    // Here for future support/reference only (180DPI tape printers)
-    PTH500 = 0x64,
-    PTE500 = 0x65,
-    PTP700 = 0x67,
-
-    #[num_enum(catch_all)]
-    Unknown(u8),
+    /// QL-710W.
+    Ql710w,
+    /// QL-720NW.
+    Ql720nw,
+    /// QL-800.
+    Ql800,
+    /// QL-810W.
+    Ql810w,
+    /// QL-820NWB.
+    Ql820nwb,
+    /// Something else.
+    Other(u8),
 }
 
 impl Model {
-    pub fn dpi(&self) -> u16 {
-        match self {
-            Self::QL710W
-            | Self::QL720NW
-            | Self::QL800
-            | Self::QL810W
-            | Self::QL820NWB
-            | Self::QL600 => 300,
-            Self::PTH500 | Self::PTE500 | Self::PTP700 => 180,
-            Self::Unknown(_) => 0,
-        }
+    /// Whether it prints in high resolution (300 × 600 dpi): every known model; an unknown one
+    /// is taken not to.
+    #[must_use]
+    pub fn high_resolution(self) -> bool {
+        !matches!(self, Self::Other(_))
     }
 
-    /// Does the printer take TIFF (PackBits) compressed raster lines: the QL-710W, 720NW,
-    /// 810W and 820NWB do; the QL-800 and QL-600 don't (their references).
-    pub fn support_compression(&self) -> bool {
+    /// Whether it takes TIFF (PackBits) compressed raster lines: the QL-710W, 720NW, 810W and
+    /// 820NWB do; the QL-800 doesn't (their references).
+    #[must_use]
+    pub fn compression(self) -> bool {
         matches!(
             self,
-            Self::QL710W | Self::QL720NW | Self::QL810W | Self::QL820NWB
+            Self::Ql710w | Self::Ql720nw | Self::Ql810w | Self::Ql820nwb
         )
     }
 
-    /// Does the printer support double vertical resolution (i.e. half speed)
-    pub fn support_double_dpi(&self) -> bool {
+    /// Its code in the status (byte 4).
+    #[must_use]
+    pub fn code(self) -> u8 {
         match self {
-            Self::QL710W
-            | Self::QL720NW
-            | Self::QL800
-            | Self::QL810W
-            | Self::QL820NWB
-            | Self::QL600 => true,
-            Self::PTH500 | Self::PTE500 | Self::PTP700 => false,
-            Self::Unknown(_) => false,
+            Self::Ql710w => 0x36,
+            Self::Ql720nw => 0x37,
+            Self::Ql800 => 0x38,
+            Self::Ql810w => 0x39,
+            Self::Ql820nwb => 0x41,
+            Self::Other(code) => code,
+        }
+    }
+
+    fn from_code(code: u8) -> Self {
+        match code {
+            0x36 => Self::Ql710w,
+            0x37 => Self::Ql720nw,
+            0x38 => Self::Ql800,
+            0x39 => Self::Ql810w,
+            0x41 => Self::Ql820nwb,
+            other => Self::Other(other),
         }
     }
 }
 
-bitflags! {
-    #[derive(Copy, Clone, PartialEq )]
-    pub struct ErrorStatus: u16 {
-        const NO_MEDIA = 0x0001;
-        const END_OF_MEDIA = 0x0002;
-        const CUTTER_JAM = 0x0004;
-        const WEAK_BATT = 0x0008;
-        const IN_USE = 0x0010;
-        const PRINTER_OFF = 0x0020;
-        const HIGH_VOLT = 0x0040;
-        const FAN_MOTOR_ERROR = 0x0080;
-
-        const WRONG_MEDIA = 0x0100;
-        const EXP_BUFFER_FULL = 0x0200;
-        const COMMS_ERROR = 0x0400;
-        const COMMS_BUFFFER_FULL = 0x0800;
-        const COVER_OPEN = 0x1000;
-        const OVERHEAT = 0x2000;
-        const MEDIA_END = 0x4000;
-        const SYSTEM_ERROR = 0x8000;
+impl fmt::Display for Model {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ql710w => f.write_str("QL-710W"),
+            Self::Ql720nw => f.write_str("QL-720NW"),
+            Self::Ql800 => f.write_str("QL-800"),
+            Self::Ql810w => f.write_str("QL-810W"),
+            Self::Ql820nwb => f.write_str("QL-820NWB"),
+            Self::Other(code) => write!(f, "model 0x{code:02x}"),
+        }
     }
 }
 
-impl Debug for ErrorStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_set()
-            .entries(self.iter_names().map(|(s, _v)| s))
-            .finish()
-    }
-}
-
-/// Kind of media loaded in printer
-#[derive(Copy, Clone, PartialEq, Debug, FromPrimitive, IntoPrimitive)]
-#[repr(u8)]
+/// The loaded media kind (status byte 11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaKind {
-    None = 0x00,
-    LaminatedTape = 0x01,
-    NonLaminatedTape = 0x03,
-    #[num_enum(alternatives = [0x17])] // HeatSrink 3:1 (higher shrink ratio(?))
-    HeatShrinkTube = 0x11,
-    FlexibleTape = 0x14,
-    #[num_enum(alternatives = [0x0a])] // At least for my QL810W printer....
-    ContinuousLengthTape = 0x4a, // Used for both paper and film.
-    DieCutLabels = 0x4b, // Used for both paper and film.
-
-    #[num_enum(catch_all)]
-    IncompatibleTape(u8),
+    /// Nothing loaded.
+    None,
+    /// Continuous length tape (paper or film).
+    Continuous,
+    /// Die-cut labels.
+    DieCut,
+    /// Something else.
+    Other(u8),
 }
 
-#[derive(Copy, Clone, PartialEq, Debug, FromPrimitive)]
-#[repr(u8)]
-pub enum DeviceStatus {
-    Reply = 0x00,
-    Completed = 0x01,
-    Error = 0x02,
-    ExitIF = 0x03,
-    TurnedOff = 0x04,
-    Notification = 0x05,
-    PhaseChange = 0x06,
+impl MediaKind {
+    fn from_code(code: u8) -> Self {
+        match code {
+            0x00 => Self::None,
+            // 0Ah in the QL-800 reference; 4Ah on some firmware (seen on our QL-810W).
+            0x0a | 0x4a => Self::Continuous,
+            0x0b | 0x4b => Self::DieCut,
+            other => Self::Other(other),
+        }
+    }
 
-    #[num_enum(catch_all)]
-    Unknown(u8),
+    /// The code for the "print information" command.
+    #[must_use]
+    pub fn code(self) -> u8 {
+        match self {
+            Self::None => 0x00,
+            Self::Continuous => 0x0a,
+            Self::DieCut => 0x0b,
+            Self::Other(code) => code,
+        }
+    }
 }
 
-/// Tape colour enumerations
-#[derive(Copy, Clone, PartialEq, Debug, FromPrimitive)]
-#[repr(u8)]
+/// Error bits (status bytes 8 and 9), as named in the reference.
+const ERRORS: [(u16, &str); 14] = [
+    (0x0001, "no media"),
+    (0x0002, "end of media"),
+    (0x0004, "cutter jam"),
+    (0x0010, "printer in use"),
+    (0x0020, "printer turned off"),
+    (0x0040, "high-voltage adapter"),
+    (0x0080, "fan motor error"),
+    (0x0100, "replace media"),
+    (0x0200, "expansion buffer full"),
+    (0x0400, "communication error"),
+    (0x0800, "communication buffer full"),
+    (0x1000, "cover open"),
+    (0x2000, "overheating"),
+    (0x8000, "system error"),
+];
 
-pub enum TapeColour {
-    White = 0x01,
-    Other = 0x02,
-    ClearBlack = 0x03,
-    Red = 0x04,
-    Blue = 0x05,
-    Black = 0x08,
-    ClearWhite = 0x09,
-    MatteWhite = 0x20,
-    MatteClear = 0x21,
-    MatteSilver = 0x22,
-    SatinGold = 0x23,
-    SatinSilver = 0x24,
-    BlueD = 0x30,
-    RedD = 0x31,
-    FluroOrange = 0x40,
-    FluroYellow = 0x41,
-    BerryPinkS = 0x50,
-    LightGrayS = 0x51,
-    LimeGreenS = 0x52,
-    YellowF = 0x60,
-    PinkF = 0x61,
-    BlueF = 0x62,
-    WhiteHst = 0x70,
-    WhiteFlexId = 0x90,
-    YellowFlexId = 0x91,
-    Cleaning = 0xF0,
-    Stencil = 0xF1,
-
-    #[num_enum(default)]
-    Unknown = 0,
+/// A decoded status block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Status {
+    /// The model.
+    pub model: Model,
+    /// Raw error bits (byte 8 low, byte 9 high).
+    pub errors: u16,
+    /// Media width in millimetres.
+    pub media_width_mm: u8,
+    /// Media length in millimetres (0 for continuous tape).
+    pub media_length_mm: u8,
+    /// Media kind.
+    pub media_kind: MediaKind,
 }
 
-/// Text colour enumerations
-#[derive(Copy, Clone, PartialEq, Debug, FromPrimitive)]
-#[repr(u8)]
-pub enum TextColour {
-    White = 0x01,
-    Red = 0x04,
-    Blue = 0x05,
-    Black = 0x08,
-    Gold = 0x0A,
-    BlueF = 0x62,
-    Cleaning = 0xf0,
-    Stencil = 0xF1,
-    Other = 0x02,
+impl TryFrom<&[u8]> for Status {
+    type Error = PrinterError;
 
-    #[num_enum(default)]
-    Unknown = 0,
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        let block: &[u8; 32] = bytes
+            .try_into()
+            .map_err(|_| PrinterError::InvalidStatus(bytes.len()))?;
+
+        Ok(Self {
+            model: Model::from_code(block[4]),
+            errors: u16::from_le_bytes([block[8], block[9]]),
+            media_width_mm: block[10],
+            media_length_mm: block[17],
+            media_kind: MediaKind::from_code(block[11]),
+        })
+    }
 }
 
-#[test]
-fn parse_status() {
-    // 80204234393004000000320a00001b0000000000000000000001000000000000
-    let _status_example = [
+impl Status {
+    /// The names of the error bits that are set.
+    #[must_use]
+    pub fn error_names(&self) -> Vec<&'static str> {
+        ERRORS
+            .iter()
+            .filter(|(bit, _)| self.errors & bit != 0)
+            .map(|(_, name)| *name)
+            .collect()
+    }
+
+    /// Whether the printer can print: no errors and media loaded.
+    #[must_use]
+    pub fn is_ready(&self) -> bool {
+        self.errors == 0 && self.media_kind != MediaKind::None
+    }
+
+    /// The loaded medium, if it is one of the media table.
+    #[must_use]
+    pub fn loaded_media(&self) -> Option<&'static Media> {
+        let continuous = match self.media_kind {
+            MediaKind::Continuous => true,
+            MediaKind::DieCut => false,
+            MediaKind::None | MediaKind::Other(_) => return None,
+        };
+        Media::reported(continuous, self.media_width_mm, self.media_length_mm)
+    }
+
+    /// Whether `media` is loaded.
+    #[must_use]
+    pub fn has_media(&self, media: &Media) -> bool {
+        self.loaded_media() == Some(media)
+    }
+
+    /// The loaded media in words: `62 mm continuous`, `29 × 90 mm die-cut`.
+    #[must_use]
+    pub fn media_description(&self) -> String {
+        if let Some(media) = self.loaded_media() {
+            return media.to_string();
+        }
+
+        match self.media_kind {
+            MediaKind::None => "no media".to_owned(),
+            MediaKind::Continuous => format!("{} mm continuous", self.media_width_mm),
+            MediaKind::DieCut => format!(
+                "{} × {} mm die-cut",
+                self.media_width_mm, self.media_length_mm
+            ),
+            MediaKind::Other(code) => {
+                format!("{} mm, media type 0x{code:02x}", self.media_width_mm)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_models_have_high_resolution() {
+        for code in [0x36, 0x37, 0x38, 0x39, 0x41] {
+            let model = Model::from_code(code);
+            assert_eq!(model.code(), code);
+            assert!(model.high_resolution(), "{model}");
+        }
+        assert!(!Model::Other(0x64).high_resolution());
+    }
+
+    /// A QL-810W answer captured by the ql-raster fork: 50 mm continuous, no errors.
+    const QL810W_50MM: [u8; 32] = [
         128, 32, 66, 52, 57, 48, 4, 0, 0, 0, 50, 10, 0, 0, 27, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0,
         0, 0, 0, 0, 0,
     ];
+
+    #[test]
+    fn decodes_a_real_status() {
+        let status = Status::try_from(QL810W_50MM.as_slice()).expect("32 bytes");
+
+        assert_eq!(status.model, Model::Ql810w);
+        assert_eq!(status.media_kind, MediaKind::Continuous);
+        assert_eq!(status.media_width_mm, 50);
+        assert!(status.is_ready());
+        assert_eq!(status.loaded_media(), Media::by_id("50"));
+        assert!(!status.has_media(Media::by_id("62").expect("known")));
+        assert_eq!(status.media_description(), "50 mm continuous");
+    }
+
+    #[test]
+    fn names_errors_and_rejects_bad_sizes() {
+        let mut block = QL810W_50MM;
+        block[8] = 0x01;
+        block[9] = 0x10;
+
+        let status = Status::try_from(block.as_slice()).expect("32 bytes");
+        assert_eq!(status.error_names(), vec!["no media", "cover open"]);
+        assert!(!status.is_ready());
+
+        assert!(Status::try_from(&block[..31]).is_err());
+    }
 }

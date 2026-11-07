@@ -1,9 +1,10 @@
-//! Brother printers on USB, through Windows' own USB printer driver (no Brother driver needed).
+//! The USB device layer (Windows): Brother printers through Windows' own USB printer driver
+//! (no Brother driver needed). [`super`] builds `usb:` addresses on top.
 //!
-//! How to use: [`find`] lists the Brother printers plugged in; [`PTouchUsbInterface::open`]
+//! How to use: [`find`] lists the Brother printers plugged in; [`Connection::open`]
 //! opens one by its path. Then `write` a job (the same bytes as over TCP port 9100) or
-//! [`PTouchUsbInterface::status`] for the 32-byte status (the same as over SNMP);
-//! [`PTouchUsbInterface::print`] sends a job and waits for the printer to say how it went.
+//! [`Connection::status`] for the 32-byte status (the same as over SNMP);
+//! [`Connection::print`] sends a job and waits for the printer to say how it went.
 //!
 //! Working principle: Windows binds "USB Printing Support" (usbprint.sys) to a printer's USB
 //! printer-class interface by itself, also without the Brother driver (that one uses it too).
@@ -15,25 +16,25 @@
 //! (concurrent printing) and stops at a zero raster line (5Ah) without TIFF compression; send
 //! blank lines as `g` lines. `QL_USB_TRACE` logs every read and write. Windows only.
 
+// Windows' SetupAPI and file calls: the one place with FFI, so `unsafe` is allowed here only.
+#![allow(unsafe_code)]
+
 use std::ffi::c_void;
 use std::io;
 use std::time::{Duration, Instant};
 
-use windows_sys::core::GUID;
 use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
-    SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInterfaces, SetupDiGetClassDevsW,
-    SetupDiGetDeviceInterfaceDetailW, DIGCF_DEVICEINTERFACE, DIGCF_PRESENT,
-    SP_DEVICE_INTERFACE_DATA, SP_DEVICE_INTERFACE_DETAIL_DATA_W,
+    DIGCF_DEVICEINTERFACE, DIGCF_PRESENT, SP_DEVICE_INTERFACE_DATA,
+    SP_DEVICE_INTERFACE_DETAIL_DATA_W, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInterfaces,
+    SetupDiGetClassDevsW, SetupDiGetDeviceInterfaceDetailW,
 };
 use windows_sys::Win32::Foundation::{
     CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, OPEN_EXISTING,
+    CreateFileW, FILE_ATTRIBUTE_NORMAL, OPEN_EXISTING, ReadFile, WriteFile,
 };
-
-use crate::interface::PTouchInterface;
-use crate::PTResult;
+use windows_sys::core::GUID;
 
 /// GUID_DEVINTERFACE_USBPRINT: usbprint.sys's printer interfaces.
 const USBPRINT: GUID = GUID::from_u128(0x28d7_8fad_5a12_11d1_ae5b_0000_f803_a8c2);
@@ -49,10 +50,10 @@ pub const STATUS_ERROR: u8 = 0x02;
 /// Windows' "in use by another process".
 const ERROR_SHARING_VIOLATION: i32 = 32;
 
-/// How long [`PTouchUsbInterface::open`] waits for the spooler to let go.
+/// How long [`Connection::open`] waits for the spooler to let go.
 const OPEN_WAIT: Duration = Duration::from_secs(5);
 
-/// How long [`PTouchUsbInterface::status`] waits for the answer.
+/// How long [`Connection::status`] waits for the answer.
 const STATUS_WAIT: Duration = Duration::from_secs(2);
 
 /// A Brother printer on USB.
@@ -170,20 +171,19 @@ fn device_paths() -> Vec<String> {
 
 /// An open Brother printer on USB.
 #[derive(Debug)]
-pub struct PTouchUsbInterface {
+pub struct Connection {
     handle: HANDLE,
-    path: String,
 }
 
 // The handle is only used through &mut self.
-unsafe impl Send for PTouchUsbInterface {}
+unsafe impl Send for Connection {}
 
-impl PTouchUsbInterface {
+impl Connection {
     /// Opens the printer at `path` (from [`find`]), for this process alone: Windows' print
     /// spooler talks to a printer with a driver too (bidirectional support: status requests),
     /// and its requests in the middle of a job break the job. While the spooler has it open,
     /// tries again for a few seconds.
-    pub fn open(path: &str) -> PTResult<Self> {
+    pub fn open(path: &str) -> io::Result<Self> {
         let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
         let deadline = Instant::now() + OPEN_WAIT;
         loop {
@@ -201,22 +201,19 @@ impl PTouchUsbInterface {
             };
             if handle != INVALID_HANDLE_VALUE {
                 trace(format_args!("opened {path}"));
-                return Ok(Self {
-                    handle,
-                    path: path.to_owned(),
-                });
+                return Ok(Self { handle });
             }
             let error = io::Error::last_os_error();
             trace(format_args!("open: {error}"));
             if error.raw_os_error() != Some(ERROR_SHARING_VIOLATION) || Instant::now() > deadline {
-                return Err(error.into());
+                return Err(error);
             }
             std::thread::sleep(Duration::from_millis(100));
         }
     }
 
     /// The printer's 32-byte status: invalidate, initialise, `ESC i S`, and the answer.
-    pub fn status(&mut self) -> PTResult<[u8; 32]> {
+    pub fn status(&mut self) -> io::Result<[u8; 32]> {
         self.drain()?;
         let mut request = vec![0_u8; 200];
         request.extend_from_slice(&[0x1b, 0x40, 0x1b, 0x69, 0x53]);
@@ -227,7 +224,7 @@ impl PTouchUsbInterface {
     /// Sends a print job and reads the printer's messages until it reports "printing
     /// completed" or an error (status type, byte 18: 01h, 02h); that last status. On USB the
     /// printer tells how a job went, and expects them to be read.
-    pub fn print(&mut self, job: &[u8], wait: Duration) -> PTResult<[u8; 32]> {
+    pub fn print(&mut self, job: &[u8], wait: Duration) -> io::Result<[u8; 32]> {
         self.drain()?;
         self.write(job)?;
         let deadline = Instant::now() + wait;
@@ -256,14 +253,14 @@ impl PTouchUsbInterface {
     }
 
     /// Reads away what the printer said before (a job's messages).
-    fn drain(&mut self) -> PTResult<()> {
+    fn drain(&mut self) -> io::Result<()> {
         let mut stale = [0_u8; 64];
         while self.read(&mut stale)? > 0 {}
         Ok(())
     }
 
     /// The next 32-byte status block, waiting until `deadline`.
-    fn next_status(&mut self, deadline: Instant) -> PTResult<[u8; 32]> {
+    fn next_status(&mut self, deadline: Instant) -> io::Result<[u8; 32]> {
         let mut status = [0_u8; 32];
         let mut got = 0;
         while got < status.len() {
@@ -271,7 +268,7 @@ impl PTouchUsbInterface {
             got += read;
             if read == 0 {
                 if Instant::now() > deadline {
-                    return Err(io::Error::new(io::ErrorKind::TimedOut, "no status").into());
+                    return Err(io::Error::new(io::ErrorKind::TimedOut, "no status"));
                 }
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -280,12 +277,9 @@ impl PTouchUsbInterface {
     }
 }
 
-impl PTouchInterface for PTouchUsbInterface {
-    fn name(&self) -> String {
-        format!("PTouch USB interface on {}", self.path)
-    }
-
-    fn read(&mut self, buf: &mut [u8]) -> PTResult<usize> {
+impl Connection {
+    /// Reads what the printer sent; 0 bytes when it has nothing to say.
+    pub fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut read = 0_u32;
         let length = u32::try_from(buf.len()).unwrap_or(u32::MAX);
         // SAFETY: buf is valid for `length` bytes.
@@ -301,7 +295,7 @@ impl PTouchInterface for PTouchUsbInterface {
         if ok == 0 {
             let error = io::Error::last_os_error();
             trace(format_args!("read error {error}"));
-            return Err(error.into());
+            return Err(error);
         }
         if read > 0 {
             trace(format_args!("read {read}: {:02x?}", &buf[..read as usize]));
@@ -309,7 +303,8 @@ impl PTouchInterface for PTouchUsbInterface {
         Ok(read as usize)
     }
 
-    fn read_vec(&mut self) -> PTResult<Vec<u8>> {
+    /// Reads everything the printer has sent so far.
+    pub fn read_vec(&mut self) -> io::Result<Vec<u8>> {
         let mut all = Vec::new();
         let mut buf = [0_u8; 64];
         loop {
@@ -321,7 +316,8 @@ impl PTouchInterface for PTouchUsbInterface {
         }
     }
 
-    fn write(&mut self, data: &[u8]) -> PTResult<()> {
+    /// Writes `data` to the printer (a job, a status request).
+    pub fn write(&mut self, data: &[u8]) -> io::Result<()> {
         let mut rest = data;
         while !rest.is_empty() {
             let mut written = 0_u32;
@@ -340,7 +336,7 @@ impl PTouchInterface for PTouchUsbInterface {
             if ok == 0 {
                 let error = io::Error::last_os_error();
                 trace(format_args!("write {length} error {error}"));
-                return Err(error.into());
+                return Err(error);
             }
             trace(format_args!("write {length}: {written} written"));
             rest = &rest[written as usize..];
@@ -349,7 +345,7 @@ impl PTouchInterface for PTouchUsbInterface {
     }
 }
 
-impl Drop for PTouchUsbInterface {
+impl Drop for Connection {
     fn drop(&mut self) {
         // SAFETY: our own open handle.
         unsafe {
