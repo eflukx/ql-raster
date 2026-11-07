@@ -50,6 +50,16 @@ pub fn find() -> Vec<Found> {
     Vec::new()
 }
 
+/// Whether the USB printer at `address` is plugged in. Asks Windows, not the printer (no USB
+/// traffic, so it doesn't hold the printer to USB): cheap enough to poll.
+#[must_use]
+pub fn is_present(address: &str) -> bool {
+    is_usb(address)
+        && find()
+            .iter()
+            .any(|found| found.address.eq_ignore_ascii_case(address))
+}
+
 /// The status of the USB printer at `address`.
 pub fn query_status(address: &str) -> Result<Status, PrinterError> {
     #[cfg(windows)]
@@ -130,6 +140,11 @@ mod tests {
     fn usb_addresses() {
         assert!(is_usb("usb:000H6Z560817"));
         assert!(!is_usb("192.168.1.57"));
+    }
+
+    #[test]
+    fn a_network_address_is_never_on_usb() {
+        assert!(!is_present("192.168.1.57"));
     }
 
     #[test]
