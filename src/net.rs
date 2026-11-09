@@ -107,6 +107,9 @@ pub struct Found {
     pub address: IpAddr,
     /// Its model name, as SNMP gives it (`Brother QL-810W`).
     pub model: String,
+    /// Its own name (`sysName`: `LabelPrinter_2`, or `BRW…` when never set), for a Brother QL
+    /// that gave one.
+    pub name: Option<String>,
 }
 
 impl Found {
@@ -163,43 +166,157 @@ pub fn searched_networks(known: &[Ipv4Addr]) -> Vec<String> {
     networks
 }
 
-/// Asks every address for its model name at once; the ones that answer within `wait`, in
-/// address order.
+/// An SNMPv2c GET for several values (community `public`); the `snmp` crate builds one for a
+/// single value only.
+fn get_request(id: i32, oids: &[&[u32]]) -> Vec<u8> {
+    fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
+        let mut out = vec![tag];
+        let length = content.len();
+        if length < 0x80 {
+            out.push(u8::try_from(length).unwrap_or(0));
+        } else {
+            let bytes: Vec<u8> = length
+                .to_be_bytes()
+                .into_iter()
+                .skip_while(|byte| *byte == 0)
+                .collect();
+            out.push(0x80 | u8::try_from(bytes.len()).unwrap_or(0));
+            out.extend(bytes);
+        }
+        out.extend_from_slice(content);
+        out
+    }
+    fn integer(value: i32) -> Vec<u8> {
+        let bytes = value.to_be_bytes();
+        // The shortest two's complement form.
+        let mut start = 0;
+        while start < 3
+            && ((bytes[start] == 0 && bytes[start + 1] & 0x80 == 0)
+                || (bytes[start] == 0xff && bytes[start + 1] & 0x80 != 0))
+        {
+            start += 1;
+        }
+        tlv(0x02, &bytes[start..])
+    }
+    fn oid(parts: &[u32]) -> Vec<u8> {
+        let mut out = vec![u8::try_from(parts[0] * 40 + parts[1]).unwrap_or(0)];
+        for &part in &parts[2..] {
+            let mut groups = vec![u8::try_from(part & 0x7f).unwrap_or(0)];
+            let mut rest = part >> 7;
+            while rest > 0 {
+                groups.push(0x80 | u8::try_from(rest & 0x7f).unwrap_or(0));
+                rest >>= 7;
+            }
+            groups.reverse();
+            out.extend(groups);
+        }
+        tlv(0x06, &out)
+    }
+
+    let varbinds: Vec<u8> = oids
+        .iter()
+        .flat_map(|parts| tlv(0x30, &[oid(parts), vec![0x05, 0x00]].concat()))
+        .collect();
+    let pdu = tlv(
+        0xa0,
+        &[integer(id), integer(0), integer(0), tlv(0x30, &varbinds)].concat(),
+    );
+    // Version 1: SNMPv2c, as the snmp crate sends.
+    tlv(0x30, &[integer(1), tlv(0x04, b"public"), pdu].concat())
+}
+
+/// When [`probe`] asks again the addresses that haven't answered, after the first ask.
+///
+/// Windows holds only a few packets while it looks up an address on the network (ARP), so a
+/// burst to a whole /24 loses the request to most devices it hasn't talked to lately; a Wi-Fi
+/// printer in power save misses one too. By the second ask the lookups are done.
+const ASK_AGAIN: [Duration; 4] = [
+    Duration::from_millis(300),
+    Duration::from_millis(600),
+    Duration::from_millis(900),
+    Duration::from_millis(1200),
+];
+
+/// Asks every address for its model name, again after [`ASK_AGAIN`] those that haven't
+/// answered; the ones that answer within `wait`, in address order.
 #[must_use]
 pub fn probe(addresses: &[SocketAddr], wait: Duration) -> Vec<Found> {
     let Ok(socket) = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)) else {
         return Vec::new();
     };
-    for (index, address) in addresses.iter().enumerate() {
-        let mut request = snmp::pdu::Buf::default();
-        let id = i32::try_from(index).unwrap_or(i32::MAX);
-        snmp::pdu::build_get(b"public", id, MODEL_OID, &mut request);
-        // A full send buffer or an unreachable address only loses that one.
-        let _ = socket.send_to(&request, address);
-    }
+    let ask = |found: &[Found]| {
+        for (index, address) in addresses.iter().enumerate() {
+            if found.iter().any(|known| known.address == address.ip()) {
+                continue;
+            }
+            let id = i32::try_from(index).unwrap_or(i32::MAX);
+            // The model and the device's own name in one request: a second request right
+            // after the burst is often lost.
+            let request = get_request(id, &[MODEL_OID, NAME_OID]);
+            // A full send buffer or an unreachable address only loses that one.
+            let _ = socket.send_to(&request, address);
+        }
+    };
 
+    let started = Instant::now();
+    let deadline = started + wait;
+    let mut asks = ASK_AGAIN
+        .iter()
+        .map(|after| started + *after)
+        .filter(|at| *at < deadline);
+    let mut next_ask = asks.next();
     let mut found: Vec<Found> = Vec::new();
-    let deadline = Instant::now() + wait;
+    ask(&found);
     let mut buffer = [0_u8; 1500];
-    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
-        if left.is_zero() || socket.set_read_timeout(Some(left)).is_err() {
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            break;
+        }
+        if next_ask.is_some_and(|at| now >= at) {
+            ask(&found);
+            next_ask = asks.next();
+        }
+        // Wait for answers until the next ask or the end.
+        let until = next_ask.map_or(deadline, |at| at.min(deadline));
+        let left = until
+            .saturating_duration_since(now)
+            .max(Duration::from_millis(1));
+        if socket.set_read_timeout(Some(left)).is_err() {
             break;
         }
         let (length, from) = match socket.recv_from(&mut buffer) {
             Ok(received) => received,
             // Windows reports a closed port (ICMP) of an earlier send this way: go on.
             Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => continue,
+            // The read timed out: time to ask again, or the end.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue;
+            }
             Err(_) => break,
         };
         let Ok(mut reply) = snmp::SnmpPdu::from_bytes(&buffer[..length]) else {
             continue;
         };
-        if let Some((_, snmp::Value::OctetString(bytes))) = reply.varbinds.next()
+        let text = |value: Option<(snmp::ObjectIdentifier<'_>, snmp::Value<'_>)>| match value {
+            Some((_, snmp::Value::OctetString(bytes))) => {
+                Some(String::from_utf8_lossy(bytes).trim().to_owned())
+            }
+            _ => None,
+        };
+        if let Some(model) = text(reply.varbinds.next())
             && !found.iter().any(|known| known.address == from.ip())
         {
+            let name = text(reply.varbinds.next()).filter(|name| !name.is_empty());
             found.push(Found {
                 address: from.ip(),
-                model: String::from_utf8_lossy(bytes).trim().to_owned(),
+                model,
+                name,
             });
         }
     }
@@ -280,10 +397,24 @@ mod tests {
             found,
             [Found {
                 address: address.ip(),
-                model: "Brother QL-810W".to_owned()
+                model: "Brother QL-810W".to_owned(),
+                name: None,
             }]
         );
         assert!(found[0].is_brother_ql());
+    }
+
+    #[test]
+    fn a_get_request_matches_the_snmp_crate_and_carries_several_values() {
+        for id in [0, 1, 127, 128, 300, 70_000, i32::MAX] {
+            let mut expected = snmp::pdu::Buf::default();
+            snmp::pdu::build_get(b"public", id, MODEL_OID, &mut expected);
+            assert_eq!(get_request(id, &[MODEL_OID]), &expected[..], "id {id}");
+        }
+        let both = get_request(5, &[MODEL_OID, NAME_OID]);
+        let parsed = snmp::SnmpPdu::from_bytes(&both).expect("SNMP");
+        assert_eq!(parsed.req_id, 5);
+        assert_eq!(parsed.varbinds.count(), 2);
     }
 
     #[test]
